@@ -146,6 +146,44 @@ suite('GitIgnore Assistant Extension', () => {
 		}
 	});
 
+	test('Clean command runs on root .gitignore when invoked with resource', async function () {
+		this.timeout(10000);
+		const folder = ensureWorkspace();
+		const gitignoreUri = vscode.Uri.joinPath(folder.uri, '.gitignore');
+		await vscode.workspace.fs.writeFile(gitignoreUri, textEncoder.encode('dist/\n\nnode_modules/\n'));
+
+		await vscode.commands.executeCommand('gitignore-assistant.cleanGitignore', gitignoreUri);
+
+		const cleaned = await readGitignore(folder);
+		const lines = cleaned.trim().split('\n');
+		assert.deepStrictEqual(
+			lines,
+			['.DS_Store', 'dist/', 'node_modules/'],
+			'Clean command should process root .gitignore when invoked from the editor context menu'
+		);
+	});
+
+	test('Clean command ignores non-root .gitignore resources', async function () {
+		this.timeout(10000);
+		const folder = ensureWorkspace();
+		const nestedDir = vscode.Uri.joinPath(folder.uri, 'packages');
+		await vscode.workspace.fs.createDirectory(nestedDir);
+		const nestedGitignore = vscode.Uri.joinPath(nestedDir, '.gitignore');
+		await vscode.workspace.fs.writeFile(nestedGitignore, textEncoder.encode('dist/\n'));
+
+		await vscode.commands.executeCommand('gitignore-assistant.cleanGitignore', nestedGitignore);
+
+		try {
+			await readGitignore(folder);
+			assert.fail('Root .gitignore should not be created when cleaning a non-root file.');
+		} catch (error) {
+			assert.ok(error instanceof vscode.FileSystemError, 'Expected FileSystemError when reading missing .gitignore');
+			if (error instanceof vscode.FileSystemError) {
+				assert.strictEqual(error.code, 'FileNotFound');
+			}
+		}
+	});
+
 	function ensureWorkspace(): vscode.WorkspaceFolder {
 		if (!workspaceFolder) {
 			throw new Error('Test workspace not initialized.');

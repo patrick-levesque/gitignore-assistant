@@ -58,6 +58,13 @@
           "when": "resourceScheme == 'file'",
           "group": "1_gitignore-assistant@3"
         }
+      ],
+      "editor/context": [
+        {
+          "command": "gitignore-assistant.cleanGitignore",
+          "when": "gitignoreAssistant.isRootGitignoreEditor",
+          "group": "navigation@-1"
+        }
       ]
     },
     "configuration": {

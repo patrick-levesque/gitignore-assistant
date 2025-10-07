@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder('utf-8');
 const BASE_ENTRIES = ['.DS_Store'];
+const ROOT_GITIGNORE_CONTEXT = 'gitignoreAssistant.isRootGitignoreEditor';
 
 interface GitignoreState {
 	uri: vscode.Uri;
@@ -43,11 +44,22 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	);
 
-	const cleanDisposable = vscode.commands.registerCommand('gitignore-assistant.cleanGitignore', async () => {
-		await handleCleanGitignoreCommand();
+	const cleanDisposable = vscode.commands.registerCommand(
+		'gitignore-assistant.cleanGitignore',
+		async (resourceUri: vscode.Uri | undefined) => {
+			await handleCleanGitignoreCommand(resourceUri);
+		}
+	);
+
+	updateRootGitignoreContext(vscode.window.activeTextEditor);
+	const activeEditorDisposable = vscode.window.onDidChangeActiveTextEditor((editor) => {
+		updateRootGitignoreContext(editor);
+	});
+	const documentCloseDisposable = vscode.workspace.onDidCloseTextDocument(() => {
+		updateRootGitignoreContext(vscode.window.activeTextEditor);
 	});
 
-	context.subscriptions.push(addDisposable, removeDisposable, cleanDisposable);
+	context.subscriptions.push(addDisposable, removeDisposable, cleanDisposable, activeEditorDisposable, documentCloseDisposable);
 }
 
 export function deactivate() {}
@@ -91,13 +103,43 @@ async function handleGitignoreCommand(
 	);
 }
 
-async function handleCleanGitignoreCommand(): Promise<void> {
-	const workspace = await pickWorkspaceFolder();
+async function handleCleanGitignoreCommand(resourceUri?: vscode.Uri): Promise<void> {
+	let workspace: vscode.WorkspaceFolder | undefined;
+	let gitignoreUri: vscode.Uri;
+
+	if (resourceUri) {
+		workspace = vscode.workspace.getWorkspaceFolder(resourceUri);
+		if (!workspace) {
+			const message = 'Clean .gitignore is only available for files inside an open workspace folder.';
+			if (shouldShowNotifications()) {
+				vscode.window.showWarningMessage(message);
+			} else {
+				console.warn(`gitignore-assistant: ${message}`);
+			}
+			return;
+		}
+		const relative = path.relative(workspace.uri.fsPath, resourceUri.fsPath);
+		if (relative !== '.gitignore') {
+			const message = 'Clean .gitignore can only be run on the workspace root .gitignore file.';
+			if (shouldShowNotifications()) {
+				vscode.window.showWarningMessage(message);
+			} else {
+				console.warn(`gitignore-assistant: ${message}`);
+			}
+			return;
+		}
+		gitignoreUri = resourceUri;
+	} else {
+		workspace = await pickWorkspaceFolder();
+		if (!workspace) {
+			return;
+		}
+		gitignoreUri = vscode.Uri.joinPath(workspace.uri, '.gitignore');
+	}
+
 	if (!workspace) {
 		return;
 	}
-
-	const gitignoreUri = vscode.Uri.joinPath(workspace.uri, '.gitignore');
 	let content: string;
 
 	try {
@@ -198,6 +240,26 @@ function cleanGitignoreEntries(lines: string[], options: { sort: boolean }): Cle
 	};
 }
 
+function updateRootGitignoreContext(editor: vscode.TextEditor | undefined | null): void {
+	const isRoot = editor ? isRootGitignoreDocument(editor.document) : false;
+	void vscode.commands.executeCommand('setContext', ROOT_GITIGNORE_CONTEXT, isRoot);
+}
+
+function isRootGitignoreDocument(document: vscode.TextDocument | undefined): boolean {
+	if (!document || document.uri.scheme !== 'file') {
+		return false;
+	}
+	if (path.basename(document.uri.fsPath) !== '.gitignore') {
+		return false;
+	}
+	const workspace = vscode.workspace.getWorkspaceFolder(document.uri);
+	if (!workspace) {
+		return false;
+	}
+	const relative = path.relative(workspace.uri.fsPath, document.uri.fsPath);
+	return relative === '.gitignore';
+}
+
 function shouldSortWhenCleaning(): boolean {
 	return vscode.workspace.getConfiguration('gitignoreAssistant').get<boolean>('sortWhenCleaning', true);
 }
@@ -206,11 +268,11 @@ function presentCleaningSummary(workspace: vscode.WorkspaceFolder, result: Clean
 	const updates: string[] = [];
 	if (result.duplicatesRemoved) {
 		const suffix = result.duplicatesRemoved === 1 ? '' : 's';
-		updates.push(`${result.duplicatesRemoved} duplicate${suffix} removed`);
+		updates.push(`${result.duplicatesRemoved} duplicate${suffix}`);
 	}
 	if (result.emptyLinesRemoved) {
 		const suffix = result.emptyLinesRemoved === 1 ? '' : 's';
-		updates.push(`${result.emptyLinesRemoved} empty line${suffix} removed`);
+		updates.push(`${result.emptyLinesRemoved} empty line${suffix}`);
 	}
 	if (result.sortedApplied) {
 		updates.push('sorted alphabetically');
@@ -220,7 +282,7 @@ function presentCleaningSummary(workspace: vscode.WorkspaceFolder, result: Clean
 	}
 
 	const detail = updates.length ? `: ${formatSummaryList(updates)}` : '';
-	const message = `Cleaned .gitignore for workspace "${workspaceLabel(workspace)}"${detail}.`;
+	const message = `Cleaned .gitignore - ${detail}.`;
 
 	if (shouldShowNotifications()) {
 		vscode.window.showInformationMessage(message);
