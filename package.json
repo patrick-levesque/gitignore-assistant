@@ -79,6 +79,17 @@
           "type": "boolean",
           "default": true,
           "description": "Sort .gitignore entries alphabetically when running Clean .gitignore."
+        },
+        "gitignoreAssistant.baseEntries": {
+          "type": "array",
+          "scope": "resource",
+          "default": [
+            ".DS_Store"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "markdownDescription": "Entries that should always be present in workspace .gitignore files. Set to an empty array to disable base entries."
         }
       }
     }

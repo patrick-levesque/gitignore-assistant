@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder('utf-8');
-const BASE_ENTRIES = ['.DS_Store'];
+const DEFAULT_BASE_ENTRIES = ['.DS_Store'];
 const ROOT_GITIGNORE_CONTEXT = 'gitignoreAssistant.isRootGitignoreEditor';
 
 interface GitignoreState {
@@ -24,7 +24,8 @@ interface OperationResult {
 type GitignoreOperation = (
 	state: GitignoreState,
 	target: vscode.Uri,
-	workspace: vscode.WorkspaceFolder
+	workspace: vscode.WorkspaceFolder,
+	baseEntries: string[]
 ) => Promise<OperationResult>;
 
 export function activate(context: vscode.ExtensionContext) {
@@ -160,7 +161,8 @@ async function handleCleanGitignoreCommand(resourceUri?: vscode.Uri): Promise<vo
 
 	const originalLines = parseLines(content);
 	const sortEntries = shouldSortWhenCleaning();
-	const result = cleanGitignoreEntries(originalLines, { sort: sortEntries });
+	const baseEntries = getBaseEntries(workspace);
+	const result = cleanGitignoreEntries(originalLines, { sort: sortEntries }, baseEntries);
 	const changed = !arraysEqual(originalLines, result.lines);
 
 	if (!changed) {
@@ -204,7 +206,11 @@ interface CleanGitignoreResult {
 	baseEntriesAdded: boolean;
 }
 
-function cleanGitignoreEntries(lines: string[], options: { sort: boolean }): CleanGitignoreResult {
+function cleanGitignoreEntries(
+	lines: string[],
+	options: { sort: boolean },
+	baseEntries: string[]
+): CleanGitignoreResult {
 	const trimmed = lines.map((line) => line.trim());
 	const entries = trimmed.filter((line) => line !== '');
 	const emptyLinesRemoved = trimmed.length - entries.length;
@@ -229,7 +235,7 @@ function cleanGitignoreEntries(lines: string[], options: { sort: boolean }): Cle
 		finalEntries = sorted;
 	}
 
-	const baseEntriesAdded = enforceBaseEntries(finalEntries);
+	const baseEntriesAdded = enforceBaseEntries(finalEntries, baseEntries);
 
 	return {
 		lines: [...finalEntries],
@@ -264,6 +270,40 @@ function shouldSortWhenCleaning(): boolean {
 	return vscode.workspace.getConfiguration('gitignoreAssistant').get<boolean>('sortWhenCleaning', true);
 }
 
+function getBaseEntries(workspace?: vscode.WorkspaceFolder): string[] {
+	const configuration = vscode.workspace.getConfiguration('gitignoreAssistant', workspace?.uri);
+	const normalized = normalizeBaseEntries(configuration.get<unknown>('baseEntries'));
+	if (normalized.length === 0) {
+		const inspect = configuration.inspect<unknown>('baseEntries');
+		const hasOverride =
+			inspect?.workspaceFolderValue !== undefined ||
+			inspect?.workspaceValue !== undefined ||
+			inspect?.globalValue !== undefined;
+		return hasOverride ? [] : [...DEFAULT_BASE_ENTRIES];
+	}
+	return normalized;
+}
+
+function normalizeBaseEntries(raw: unknown): string[] {
+	if (!Array.isArray(raw)) {
+		return [...DEFAULT_BASE_ENTRIES];
+	}
+	const normalized: string[] = [];
+	const seen = new Set<string>();
+	for (const value of raw) {
+		if (typeof value !== 'string') {
+			continue;
+		}
+		const trimmed = value.trim();
+		if (!trimmed || seen.has(trimmed)) {
+			continue;
+		}
+		normalized.push(trimmed);
+		seen.add(trimmed);
+	}
+	return normalized;
+}
+
 function presentCleaningSummary(workspace: vscode.WorkspaceFolder, result: CleanGitignoreResult): void {
 	const updates: string[] = [];
 	if (result.duplicatesRemoved) {
@@ -282,7 +322,7 @@ function presentCleaningSummary(workspace: vscode.WorkspaceFolder, result: Clean
 	}
 
 	const detail = updates.length ? `: ${formatSummaryList(updates)}` : '';
-	const message = `Cleaned .gitignore - ${detail}.`;
+	const message = `Cleaned .gitignore${detail}.`;
 
 	if (shouldShowNotifications()) {
 		vscode.window.showInformationMessage(message);
@@ -339,11 +379,12 @@ async function performGitignoreUpdate(
 	let triggeredWrite = false;
 
 	for (const [workspace, uris] of grouped) {
-		const state = await loadOrCreateGitignore(workspace);
+		const baseEntries = getBaseEntries(workspace);
+		const state = await loadOrCreateGitignore(workspace, baseEntries);
 
 		for (const uri of uris) {
 			try {
-				const result = await handler(state, uri, workspace);
+				const result = await handler(state, uri, workspace, baseEntries);
 				results.push(result);
 			} catch (error) {
 				results.push({
@@ -355,7 +396,7 @@ async function performGitignoreUpdate(
 			}
 		}
 
-		state.dirty = enforceBaseEntries(state.lines) || state.dirty;
+		state.dirty = enforceBaseEntries(state.lines, baseEntries) || state.dirty;
 		const cleaned = cleanupLines(state.lines);
 		if (!arraysEqual(cleaned, state.lines)) {
 			state.lines = cleaned;
@@ -388,12 +429,13 @@ async function performGitignoreUpdate(
 async function addGitignoreEntry(
 	state: GitignoreState,
 	target: vscode.Uri,
-	workspace: vscode.WorkspaceFolder
+	workspace: vscode.WorkspaceFolder,
+	baseEntries: string[]
 ): Promise<OperationResult> {
 	const info = await buildEntryForAdd(target, workspace);
 	const workspaceName = workspaceLabel(workspace);
 
-	if (BASE_ENTRIES.includes(info.entry)) {
+	if (baseEntries.includes(info.entry)) {
 		return {
 			entry: info.entry,
 			status: 'skipped',
@@ -419,14 +461,15 @@ async function addGitignoreEntry(
 async function removeGitignoreEntry(
 	state: GitignoreState,
 	target: vscode.Uri,
-	workspace: vscode.WorkspaceFolder
+	workspace: vscode.WorkspaceFolder,
+	baseEntries: string[]
 ): Promise<OperationResult> {
 	const info = await buildEntryForRemove(target, workspace);
 	const workspaceName = workspaceLabel(workspace);
 	const candidates = [info.primary, ...info.alternates];
 	const existing = findMatchingEntry(state.lines, candidates);
 
-	if (existing && BASE_ENTRIES.includes(existing)) {
+	if (existing && baseEntries.includes(existing)) {
 		return {
 			entry: existing,
 			status: 'skipped',
@@ -455,18 +498,21 @@ async function removeGitignoreEntry(
 	};
 }
 
-async function loadOrCreateGitignore(workspace: vscode.WorkspaceFolder): Promise<GitignoreState> {
+async function loadOrCreateGitignore(
+	workspace: vscode.WorkspaceFolder,
+	baseEntries: string[]
+): Promise<GitignoreState> {
 	const gitignoreUri = vscode.Uri.joinPath(workspace.uri, '.gitignore');
 
 	try {
 		const contentBuffer = await vscode.workspace.fs.readFile(gitignoreUri);
 		const content = textDecoder.decode(contentBuffer);
 		const lines = parseLines(content);
-		const dirty = enforceBaseEntries(lines);
+		const dirty = enforceBaseEntries(lines, baseEntries);
 		return { uri: gitignoreUri, lines, dirty };
 	} catch (error) {
 		if (isFileNotFound(error)) {
-			const lines = [...BASE_ENTRIES];
+			const lines = [...baseEntries];
 			const content = serializeLines(lines);
 			await vscode.workspace.fs.writeFile(gitignoreUri, textEncoder.encode(content));
 			return { uri: gitignoreUri, lines, dirty: false };
@@ -594,10 +640,10 @@ function removeEntry(lines: string[], entry: string): boolean {
 	return removed && lines.length !== initialLength;
 }
 
-function enforceBaseEntries(lines: string[]): boolean {
+function enforceBaseEntries(lines: string[], baseEntries: string[]): boolean {
 	let updated = false;
-	for (let i = BASE_ENTRIES.length - 1; i >= 0; i -= 1) {
-		const entry = BASE_ENTRIES[i];
+	for (let i = baseEntries.length - 1; i >= 0; i -= 1) {
+		const entry = baseEntries[i];
 		if (!findMatchingEntry(lines, [entry])) {
 			lines.unshift(entry);
 			updated = true;

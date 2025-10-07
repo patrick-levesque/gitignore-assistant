@@ -184,6 +184,55 @@ suite('GitIgnore Assistant Extension', () => {
 		}
 	});
 
+	test('Custom base entries configuration is enforced', async function () {
+		this.timeout(10000);
+		const folder = ensureWorkspace();
+		const configuration = vscode.workspace.getConfiguration('gitignoreAssistant', folder.uri);
+		const inspect = configuration.inspect<string[]>('baseEntries');
+		await configuration.update('baseEntries', ['.env', 'dist/'], vscode.ConfigurationTarget.WorkspaceFolder);
+
+		try {
+			const fileUri = await createFile(folder, 'src/custom-base.ts');
+			await vscode.commands.executeCommand('gitignore-assistant.addToGitignore', fileUri);
+
+			const content = await readGitignore(folder);
+			const lines = content.trim().split('\n');
+			assert.ok(lines.includes('.env'), '.gitignore should include custom base entries');
+			assert.ok(lines.includes('dist/'), '.gitignore should include custom base entries');
+			assert.ok(!lines.includes('.DS_Store'), '.gitignore should not include default base entry when overridden');
+		} finally {
+			await configuration.update('baseEntries', inspect?.workspaceFolderValue, vscode.ConfigurationTarget.WorkspaceFolder);
+		}
+	});
+
+	test('Base entries can be cleared to allow removal', async function () {
+		this.timeout(10000);
+		const folder = ensureWorkspace();
+		const configuration = vscode.workspace.getConfiguration('gitignoreAssistant', folder.uri);
+		const inspect = configuration.inspect<string[]>('baseEntries');
+		await configuration.update('baseEntries', [], vscode.ConfigurationTarget.WorkspaceFolder);
+
+		let dsStoreUri: vscode.Uri | undefined;
+		try {
+			const gitignoreUri = vscode.Uri.joinPath(folder.uri, '.gitignore');
+			await vscode.workspace.fs.writeFile(gitignoreUri, textEncoder.encode('.DS_Store\n'));
+			dsStoreUri = await createFile(folder, '.DS_Store');
+			await vscode.commands.executeCommand('gitignore-assistant.removeFromGitignore', dsStoreUri);
+
+			const content = await readGitignore(folder);
+			assert.ok(!content.includes('.DS_Store'), '.gitignore should not re-add default base entry when cleared');
+		} finally {
+			if (dsStoreUri) {
+				try {
+					await vscode.workspace.fs.delete(dsStoreUri, { recursive: false, useTrash: false });
+				} catch {
+					// ignore cleanup errors
+				}
+			}
+			await configuration.update('baseEntries', inspect?.workspaceFolderValue, vscode.ConfigurationTarget.WorkspaceFolder);
+		}
+	});
+
 	function ensureWorkspace(): vscode.WorkspaceFolder {
 		if (!workspaceFolder) {
 			throw new Error('Test workspace not initialized.');
