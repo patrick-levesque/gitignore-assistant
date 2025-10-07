@@ -1,0 +1,83 @@
+{
+  "name": "gitignore-assistant",
+  "publisher": "patrick-levesque",
+  "displayName": "GitIgnore Assistant",
+  "description": "Quickly add or remove files and folders from .gitignore",
+  "icon": "images/gitignore-assistant.png",
+  "version": "1.0.0",
+  "author": "Patrick Levesque",
+  "license": "MIT",
+  "galleryBanner": {
+    "color": "#100f11",
+    "theme": "dark"
+  },
+  "repository": "github:patrick-levesque/gitignore-assistant",
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "git",
+    "gitignore"
+  ],
+  "engines": {
+    "vscode": "^1.104.0"
+  },
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "gitignore-assistant.addToGitignore",
+        "title": "Add to .gitignore",
+        "category": "GitIgnore Assistant"
+      },
+      {
+        "command": "gitignore-assistant.removeFromGitignore",
+        "title": "Remove from .gitignore",
+        "category": "GitIgnore Assistant"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "gitignore-assistant.addToGitignore",
+          "when": "resourceScheme == 'file'",
+          "group": "navigation@0"
+        },
+        {
+          "command": "gitignore-assistant.removeFromGitignore",
+          "when": "resourceScheme == 'file'",
+          "group": "navigation@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "GitIgnore Assistant",
+      "properties": {
+        "gitignoreAssistant.showNotifications": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show information and warning notifications when .gitignore is updated."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.104.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "@typescript-eslint/eslint-plugin": "^8.45.0",
+    "@typescript-eslint/parser": "^8.45.0",
+    "eslint": "^9.36.0",
+    "typescript": "^5.9.3",
+    "@vscode/test-cli": "^0.0.11",
+    "@vscode/test-electron": "^2.5.2"
+  }
+}
