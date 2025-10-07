@@ -1,3 +1,6 @@
+### 1.0.1 - 2025-10-07
+- Update README
+- Move menu items in their own group
 
 ### 1.0.0 - 2025-10-06
 - Initial release

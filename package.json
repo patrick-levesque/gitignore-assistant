@@ -4,7 +4,7 @@
   "displayName": "GitIgnore Assistant",
   "description": "Quickly add or remove files and folders from .gitignore",
   "icon": "images/gitignore-assistant.png",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "Patrick Levesque",
   "license": "MIT",
   "galleryBanner": {
@@ -41,12 +41,12 @@
         {
           "command": "gitignore-assistant.addToGitignore",
           "when": "resourceScheme == 'file'",
-          "group": "navigation@0"
+          "group": "1_gitignore-assistant@1"
         },
         {
           "command": "gitignore-assistant.removeFromGitignore",
           "when": "resourceScheme == 'file'",
-          "group": "navigation@1"
+          "group": "1_gitignore-assistant@2"
         }
       ]
     },
