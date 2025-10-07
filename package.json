@@ -2,9 +2,9 @@
   "name": "gitignore-assistant",
   "publisher": "patrick-levesque",
   "displayName": "GitIgnore Assistant",
-  "description": "Quickly add or remove files and folders from .gitignore",
+  "description": "Easily add, remove, or clean entries in your .gitignore",
   "icon": "images/gitignore-assistant.png",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "Patrick Levesque",
   "license": "MIT",
   "galleryBanner": {
@@ -34,6 +34,11 @@
         "command": "gitignore-assistant.removeFromGitignore",
         "title": "Remove from .gitignore",
         "category": "GitIgnore Assistant"
+      },
+      {
+        "command": "gitignore-assistant.cleanGitignore",
+        "title": "Clean .gitignore",
+        "category": "GitIgnore Assistant"
       }
     ],
     "menus": {
@@ -47,6 +52,11 @@
           "command": "gitignore-assistant.removeFromGitignore",
           "when": "resourceScheme == 'file'",
           "group": "1_gitignore-assistant@2"
+        },
+        {
+          "command": "gitignore-assistant.cleanGitignore",
+          "when": "resourceScheme == 'file'",
+          "group": "1_gitignore-assistant@3"
         }
       ]
     },
@@ -57,6 +67,11 @@
           "type": "boolean",
           "default": true,
           "description": "Show information and warning notifications when .gitignore is updated."
+        },
+        "gitignoreAssistant.sortWhenCleaning": {
+          "type": "boolean",
+          "default": true,
+          "description": "Sort .gitignore entries alphabetically when running Clean .gitignore."
         }
       }
     }

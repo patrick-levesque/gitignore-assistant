@@ -43,7 +43,11 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	);
 
-	context.subscriptions.push(addDisposable, removeDisposable);
+	const cleanDisposable = vscode.commands.registerCommand('gitignore-assistant.cleanGitignore', async () => {
+		await handleCleanGitignoreCommand();
+	});
+
+	context.subscriptions.push(addDisposable, removeDisposable, cleanDisposable);
 }
 
 export function deactivate() {}
@@ -85,6 +89,156 @@ async function handleGitignoreCommand(
 		mode,
 		mode === 'add' ? addGitignoreEntry : removeGitignoreEntry
 	);
+}
+
+async function handleCleanGitignoreCommand(): Promise<void> {
+	const workspace = await pickWorkspaceFolder();
+	if (!workspace) {
+		return;
+	}
+
+	const gitignoreUri = vscode.Uri.joinPath(workspace.uri, '.gitignore');
+	let content: string;
+
+	try {
+		const buffer = await vscode.workspace.fs.readFile(gitignoreUri);
+		content = textDecoder.decode(buffer);
+	} catch (error) {
+		if (isFileNotFound(error)) {
+			const message = `.gitignore not found in workspace "${workspaceLabel(workspace)}".`;
+			if (shouldShowNotifications()) {
+				vscode.window.showWarningMessage(message);
+			} else {
+				console.warn(`gitignore-assistant: ${message}`);
+			}
+			return;
+		}
+		throw error;
+	}
+
+	const originalLines = parseLines(content);
+	const sortEntries = shouldSortWhenCleaning();
+	const result = cleanGitignoreEntries(originalLines, { sort: sortEntries });
+	const changed = !arraysEqual(originalLines, result.lines);
+
+	if (!changed) {
+		const message = `.gitignore in workspace "${workspaceLabel(workspace)}" is already clean.`;
+		if (shouldShowNotifications()) {
+			vscode.window.showInformationMessage(message);
+		} else {
+			console.log(`gitignore-assistant: ${message}`);
+		}
+		return;
+	}
+
+	const serialized = serializeLines(result.lines);
+	await vscode.workspace.fs.writeFile(gitignoreUri, textEncoder.encode(serialized));
+	await refreshExplorerViews();
+	presentCleaningSummary(workspace, result);
+}
+
+async function pickWorkspaceFolder(): Promise<vscode.WorkspaceFolder | undefined> {
+	const folders = vscode.workspace.workspaceFolders;
+	if (!folders || folders.length === 0) {
+		const message = 'Open a workspace folder to clean its .gitignore file.';
+		if (shouldShowNotifications()) {
+			vscode.window.showWarningMessage(message);
+		} else {
+			console.warn(`gitignore-assistant: ${message}`);
+		}
+		return undefined;
+	}
+	if (folders.length === 1) {
+		return folders[0];
+	}
+	return vscode.window.showWorkspaceFolderPick({ placeHolder: 'Select a workspace to clean its .gitignore' });
+}
+
+interface CleanGitignoreResult {
+	lines: string[];
+	duplicatesRemoved: number;
+	emptyLinesRemoved: number;
+	sortedApplied: boolean;
+	baseEntriesAdded: boolean;
+}
+
+function cleanGitignoreEntries(lines: string[], options: { sort: boolean }): CleanGitignoreResult {
+	const trimmed = lines.map((line) => line.trim());
+	const entries = trimmed.filter((line) => line !== '');
+	const emptyLinesRemoved = trimmed.length - entries.length;
+	const seen = new Set<string>();
+	const deduped: string[] = [];
+
+	for (const entry of entries) {
+		if (seen.has(entry)) {
+			continue;
+		}
+		seen.add(entry);
+		deduped.push(entry);
+	}
+
+	const duplicatesRemoved = entries.length - deduped.length;
+
+	let sortedApplied = false;
+	let finalEntries = deduped;
+	if (options.sort) {
+		const sorted = [...deduped].sort((left, right) => left.localeCompare(right));
+		sortedApplied = !arraysEqual(deduped, sorted);
+		finalEntries = sorted;
+	}
+
+	const baseEntriesAdded = enforceBaseEntries(finalEntries);
+
+	return {
+		lines: [...finalEntries],
+		duplicatesRemoved,
+		emptyLinesRemoved,
+		sortedApplied,
+		baseEntriesAdded
+	};
+}
+
+function shouldSortWhenCleaning(): boolean {
+	return vscode.workspace.getConfiguration('gitignoreAssistant').get<boolean>('sortWhenCleaning', true);
+}
+
+function presentCleaningSummary(workspace: vscode.WorkspaceFolder, result: CleanGitignoreResult): void {
+	const updates: string[] = [];
+	if (result.duplicatesRemoved) {
+		const suffix = result.duplicatesRemoved === 1 ? '' : 's';
+		updates.push(`${result.duplicatesRemoved} duplicate${suffix} removed`);
+	}
+	if (result.emptyLinesRemoved) {
+		const suffix = result.emptyLinesRemoved === 1 ? '' : 's';
+		updates.push(`${result.emptyLinesRemoved} empty line${suffix} removed`);
+	}
+	if (result.sortedApplied) {
+		updates.push('sorted alphabetically');
+	}
+	if (result.baseEntriesAdded) {
+		updates.push('added base entries');
+	}
+
+	const detail = updates.length ? `: ${formatSummaryList(updates)}` : '';
+	const message = `Cleaned .gitignore for workspace "${workspaceLabel(workspace)}"${detail}.`;
+
+	if (shouldShowNotifications()) {
+		vscode.window.showInformationMessage(message);
+	} else {
+		console.log(`gitignore-assistant: ${message}`);
+	}
+}
+
+function formatSummaryList(values: string[]): string {
+	if (values.length === 1) {
+		return values[0];
+	}
+	if (values.length === 2) {
+		return `${values[0]} and ${values[1]}`;
+	}
+	const head = values.slice(0, -1).join(', ');
+	const tail = values[values.length - 1];
+	return `${head}, and ${tail}`;
 }
 
 async function performGitignoreUpdate(

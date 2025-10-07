@@ -103,6 +103,49 @@ suite('GitIgnore Assistant Extension', () => {
 		assert.strictEqual(occurrences, 1, 'Duplicate entries should not be added to .gitignore');
 	});
 
+	test('Clean command removes duplicates, empty lines, and sorts entries', async function () {
+		this.timeout(10000);
+		const folder = ensureWorkspace();
+		const gitignoreUri = vscode.Uri.joinPath(folder.uri, '.gitignore');
+		const initialContent = ['# comment', '', 'node_modules/', 'dist/', 'node_modules/', 'build/', '', 'build/'].join('\n');
+		await vscode.workspace.fs.writeFile(gitignoreUri, textEncoder.encode(`${initialContent}\n`));
+
+		await vscode.commands.executeCommand('gitignore-assistant.cleanGitignore');
+
+		const cleaned = await readGitignore(folder);
+		const lines = cleaned.trim().split('\n');
+		assert.deepStrictEqual(
+			lines,
+			['.DS_Store', '# comment', 'build/', 'dist/', 'node_modules/'],
+			'Clean command should remove duplicates, empty lines, and sort entries alphabetically'
+		);
+	});
+
+	test('Clean command respects sorting setting', async function () {
+		this.timeout(10000);
+		const folder = ensureWorkspace();
+		const gitignoreUri = vscode.Uri.joinPath(folder.uri, '.gitignore');
+		const initialContent = ['node_modules/', 'dist/', 'build/', 'dist/'].join('\n');
+		await vscode.workspace.fs.writeFile(gitignoreUri, textEncoder.encode(`${initialContent}\n`));
+
+		const configuration = vscode.workspace.getConfiguration('gitignoreAssistant');
+		const previousValue = configuration.get<boolean>('sortWhenCleaning');
+		await configuration.update('sortWhenCleaning', false, vscode.ConfigurationTarget.Workspace);
+
+		try {
+			await vscode.commands.executeCommand('gitignore-assistant.cleanGitignore');
+			const cleaned = await readGitignore(folder);
+			const lines = cleaned.trim().split('\n');
+			assert.deepStrictEqual(
+				lines,
+				['.DS_Store', 'node_modules/', 'dist/', 'build/'],
+				'Clean command should preserve original order when sorting is disabled'
+			);
+		} finally {
+			await configuration.update('sortWhenCleaning', previousValue, vscode.ConfigurationTarget.Workspace);
+		}
+	});
+
 	function ensureWorkspace(): vscode.WorkspaceFolder {
 		if (!workspaceFolder) {
 			throw new Error('Test workspace not initialized.');
