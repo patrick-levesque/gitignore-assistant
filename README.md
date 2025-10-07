@@ -4,18 +4,19 @@ A Visual Studio Code extension to easily add, remove, or clean entries in your `
 
 ## Features
 
-- Add or remove files and folders from the workspace `.gitignore` directly from the Explorer or Command Palette.
-- Automatically creates a `.gitignore` if one does not exist, seeding it with `.DS_Store`.
-- Detects existing entries to prevent duplicates.
-- One-click cleanup with **`Clean .gitignore`** removes duplicates, strips empty lines, and optionally sorts entries alphabetically.
-- Works seamlessly with any Git project.
+- Add or remove files and folders from the workspace `.gitignore` using the Explorer or Command Palette.
+- Clean the `.gitignore` file by removing duplicates, empty lines, and optionally sorting entries.
+- Ensure configured base entries are always present.
+- Automatically create a `.gitignore` if one does not exist, seeded with the configured base entries (defaults to `.DS_Store`).
+- Detect existing entries to prevent duplicates.
 
 ## Usage
 
 1. In the Explorer, right-click a file or folder.  
-2. Choose **`Add to .gitignore`** to append it to the root `.gitignore` file.  
+2. Choose **`Add to .gitignore`** to append it to the `.gitignore` file.  
 3. Choose **`Remove from .gitignore`** to delete an existing entry.  
-4. Choose **`Clean .gitignore`** to tidy the file — remove duplicates and empty lines, and optionally sort entries.
+4. Choose **`Clean .gitignore`** to remove duplicates, empty lines, and optionally sort entries.  
+5. While editing the `.gitignore` file, **`Clean .gitignore`** is also available in the editor context menu.
 
 Commands can also be invoked from the **Command Palette** (`⌘⇧P` / `Ctrl+Shift+P`). When run from the palette, you'll be prompted to select one or more files or folders.
 
@@ -25,14 +26,14 @@ This extension operates on the `.gitignore` file located at the root of the work
 
 ## Extension Settings
 
+### Base Entries
+
+Defines the list of entries that should always appear at the top of the workspace `.gitignore`. These entries are automatically ensured whenever files are added, removed, or the **`Clean .gitignore`** command is run. You can remove the default `.DS_Store` entry or add your own (e.g. `node_modules/`, `.env`) to customize the behavior. Set this array to empty to disable base entries entirely.
+
 ### Show Notifications
 
-When enabled, the extension will show notifications when files or folders are added or removed from `.gitignore`, as well as warnings if an operation cannot be completed.
+When enabled, the extension will show notifications when files or folders are added or removed from `.gitignore`, show a summary of the **`Clean .gitignore`** command, as well as warnings if an operation cannot be completed.
 
 ### Sort When Cleaning
 
 Controls whether **`Clean .gitignore`** sorts entries alphabetically (`true` by default). Set to `false` to keep the existing order while still removing duplicates and empty lines.
-
-## Notes
-
-- `.DS_Store` is always ensured to be present in newly created `.gitignore` files to help keep macOS metadata out of version control.
