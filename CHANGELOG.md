@@ -1,3 +1,6 @@
+### 1.0.4 - 2025-10-08
+- Remove unnecessary refresh of Explorer and Source Control views after `.gitignore` updates
+
 ### 1.0.3 - 2025-10-07
 - Activate extension on `onStartupFinished` event
 - Use `createOutputChannel` to log messages in a dedicated output channel

@@ -174,7 +174,6 @@ async function handleCleanGitignoreCommand(resourceUri?: vscode.Uri): Promise<vo
 
 	const serialized = serializeLines(result.lines);
 	await vscode.workspace.fs.writeFile(gitignoreUri, textEncoder.encode(serialized));
-	await refreshExplorerViews();
 	presentCleaningSummary(workspace, result);
 }
 
@@ -370,7 +369,6 @@ async function performGitignoreUpdate(
 	}
 
 	const results: OperationResult[] = [];
-	let triggeredWrite = false;
 
 	for (const [workspace, uris] of grouped) {
 		const baseEntries = getBaseEntries(workspace);
@@ -400,7 +398,6 @@ async function performGitignoreUpdate(
 		if (state.dirty) {
 			const content = serializeLines(state.lines);
 			await vscode.workspace.fs.writeFile(state.uri, textEncoder.encode(content));
-			triggeredWrite = true;
 		}
 	}
 
@@ -410,10 +407,6 @@ async function performGitignoreUpdate(
 			vscode.window.showWarningMessage(message);
 		}
 		outputChannel.appendLine(`WARNING: ${message}`);
-	}
-
-	if (triggeredWrite) {
-		await refreshExplorerViews();
 	}
 
 	presentSummary(results, mode);
@@ -745,11 +738,4 @@ function pluralizeEntry(count: number): string {
 
 function shouldShowNotifications(): boolean {
 	return vscode.workspace.getConfiguration('gitignoreAssistant').get<boolean>('showNotifications', true);
-}
-
-async function refreshExplorerViews(): Promise<void> {
-	await Promise.allSettled([
-		vscode.commands.executeCommand('workbench.files.action.refreshFilesExplorer'),
-		vscode.commands.executeCommand('git.refresh')
-	]);
 }

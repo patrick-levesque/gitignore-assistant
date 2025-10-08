@@ -4,7 +4,7 @@
   "displayName": "GitIgnore Assistant",
   "description": "Easily add, remove, or clean entries in your .gitignore",
   "icon": "images/gitignore-assistant.png",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "author": "Patrick Levesque",
   "license": "MIT",
   "galleryBanner": {
