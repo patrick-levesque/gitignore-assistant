@@ -5,6 +5,7 @@ const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder('utf-8');
 const DEFAULT_BASE_ENTRIES = ['.DS_Store'];
 const ROOT_GITIGNORE_CONTEXT = 'gitignoreAssistant.isRootGitignoreEditor';
+const outputChannel = vscode.window.createOutputChannel('GitIgnore Assistant');
 
 interface GitignoreState {
 	uri: vscode.Uri;
@@ -29,7 +30,8 @@ type GitignoreOperation = (
 ) => Promise<OperationResult>;
 
 export function activate(context: vscode.ExtensionContext) {
-	console.log('GitIgnore Assistant extension activated.');
+	const timestamp = new Date().toISOString();
+	outputChannel.appendLine(`GitIgnore Assistant extension activated at ${timestamp}`);
 
 	const addDisposable = vscode.commands.registerCommand(
 		'gitignore-assistant.addToGitignore',
@@ -91,9 +93,8 @@ async function handleGitignoreCommand(
 		const message = 'Select at least one file or folder to update .gitignore.';
 		if (shouldShowNotifications()) {
 			vscode.window.showWarningMessage(message);
-		} else {
-			console.warn(`gitignore-assistant: ${message}`);
 		}
+		outputChannel.appendLine(`WARNING: ${message}`);
 		return;
 	}
 
@@ -114,9 +115,8 @@ async function handleCleanGitignoreCommand(resourceUri?: vscode.Uri): Promise<vo
 			const message = 'Clean .gitignore is only available for files inside an open workspace folder.';
 			if (shouldShowNotifications()) {
 				vscode.window.showWarningMessage(message);
-			} else {
-				console.warn(`gitignore-assistant: ${message}`);
 			}
+			outputChannel.appendLine(`WARNING: ${message}`);
 			return;
 		}
 		const relative = path.relative(workspace.uri.fsPath, resourceUri.fsPath);
@@ -124,9 +124,8 @@ async function handleCleanGitignoreCommand(resourceUri?: vscode.Uri): Promise<vo
 			const message = 'Clean .gitignore can only be run on the workspace root .gitignore file.';
 			if (shouldShowNotifications()) {
 				vscode.window.showWarningMessage(message);
-			} else {
-				console.warn(`gitignore-assistant: ${message}`);
 			}
+			outputChannel.appendLine(`WARNING: ${message}`);
 			return;
 		}
 		gitignoreUri = resourceUri;
@@ -151,9 +150,8 @@ async function handleCleanGitignoreCommand(resourceUri?: vscode.Uri): Promise<vo
 			const message = `.gitignore not found in workspace "${workspaceLabel(workspace)}".`;
 			if (shouldShowNotifications()) {
 				vscode.window.showWarningMessage(message);
-			} else {
-				console.warn(`gitignore-assistant: ${message}`);
 			}
+			outputChannel.appendLine(`WARNING: ${message}`);
 			return;
 		}
 		throw error;
@@ -166,12 +164,11 @@ async function handleCleanGitignoreCommand(resourceUri?: vscode.Uri): Promise<vo
 	const changed = !arraysEqual(originalLines, result.lines);
 
 	if (!changed) {
-		const message = `.gitignore in workspace "${workspaceLabel(workspace)}" is already clean.`;
+		const message = `.gitignore is already clean.`;
 		if (shouldShowNotifications()) {
 			vscode.window.showInformationMessage(message);
-		} else {
-			console.log(`gitignore-assistant: ${message}`);
 		}
+		outputChannel.appendLine(`INFO: ${message}`);
 		return;
 	}
 
@@ -187,9 +184,8 @@ async function pickWorkspaceFolder(): Promise<vscode.WorkspaceFolder | undefined
 		const message = 'Open a workspace folder to clean its .gitignore file.';
 		if (shouldShowNotifications()) {
 			vscode.window.showWarningMessage(message);
-		} else {
-			console.warn(`gitignore-assistant: ${message}`);
 		}
+		outputChannel.appendLine(`WARNING: ${message}`);
 		return undefined;
 	}
 	if (folders.length === 1) {
@@ -326,9 +322,8 @@ function presentCleaningSummary(workspace: vscode.WorkspaceFolder, result: Clean
 
 	if (shouldShowNotifications()) {
 		vscode.window.showInformationMessage(message);
-	} else {
-		console.log(`gitignore-assistant: ${message}`);
 	}
+	outputChannel.appendLine(`INFO: ${message}`);
 }
 
 function formatSummaryList(values: string[]): string {
@@ -369,9 +364,8 @@ async function performGitignoreUpdate(
 		const message = 'Selected items must belong to an open workspace folder.';
 		if (shouldShowNotifications()) {
 			vscode.window.showErrorMessage(message);
-		} else {
-			console.error(`gitignore-assistant: ${message}`);
 		}
+		outputChannel.appendLine(`ERROR: ${message}`);
 		return;
 	}
 
@@ -414,9 +408,8 @@ async function performGitignoreUpdate(
 		const message = `${outsideWorkspace.length} item(s) were skipped because they are outside the current workspace.`;
 		if (shouldShowNotifications()) {
 			vscode.window.showWarningMessage(message);
-		} else {
-			console.warn(`gitignore-assistant: ${message}`);
 		}
+		outputChannel.appendLine(`WARNING: ${message}`);
 	}
 
 	if (triggeredWrite) {
@@ -679,19 +672,12 @@ function presentSummary(results: OperationResult[], mode: 'add' | 'remove'): voi
 
 	const showNotifications = shouldShowNotifications();
 
-	if (!showNotifications && !errors.length) {
-		console.log(`gitignore-assistant: ${message}`);
-		return;
-	}
-
 	if (errors.length) {
 		if (showNotifications) {
 			vscode.window.showErrorMessage(message);
 		}
 		errors.forEach((result) => {
-			console.error(
-				`gitignore-assistant: failed to ${mode} "${result.entry}" in workspace "${result.workspaceName}": ${result.detail ?? 'Unknown error'}`
-			);
+			outputChannel.appendLine(`ERROR: Failed to ${mode} "${result.entry}": ${result.detail ?? 'Unknown error'}`);
 		});
 		return;
 	}
@@ -699,6 +685,7 @@ function presentSummary(results: OperationResult[], mode: 'add' | 'remove'): voi
 	if (showNotifications) {
 		vscode.window.showInformationMessage(message);
 	}
+	outputChannel.appendLine(`INFO: ${message}`);
 }
 
 function dedupeUris(uris: vscode.Uri[]): vscode.Uri[] {

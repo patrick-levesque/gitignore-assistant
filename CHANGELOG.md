@@ -1,3 +1,8 @@
+### 1.0.3 - 2025-10-07
+- Activate extension on `onStartupFinished` event
+- Use `createOutputChannel` to log messages in a dedicated output channel
+- Update README
+
 ### 1.0.2 - 2025-10-07
 - Add clean command to remove duplicates and empty lines, with optional alphabetical sorting
 - Add setting to enable or disable sorting for the clean command

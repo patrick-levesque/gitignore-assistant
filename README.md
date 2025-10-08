@@ -28,12 +28,12 @@ This extension operates on the `.gitignore` file located at the root of the work
 
 ### Base Entries
 
-Defines the list of entries that should always appear at the top of the workspace `.gitignore`. These entries are automatically ensured whenever files are added, removed, or the **`Clean .gitignore`** command is run. You can remove the default `.DS_Store` entry or add your own (e.g. `node_modules/`, `.env`) to customize the behavior. Set this array to empty to disable base entries entirely.
+Defines the list of entries that should always appear at the top of the workspace `.gitignore`. These entries are automatically ensured whenever files are added, removed, or the **Clean** command is run. You can remove the default `.DS_Store` entry or add your own (e.g. `node_modules/`, `.env`) to customize the behavior. Set this array to empty to disable base entries entirely.
 
 ### Show Notifications
 
-When enabled, the extension will show notifications when files or folders are added or removed from `.gitignore`, show a summary of the **`Clean .gitignore`** command, as well as warnings if an operation cannot be completed.
+When enabled, the extension will show notifications when files or folders are added or removed from `.gitignore`, show a summary of the **Clean** command, as well as warnings if an operation cannot be completed. When disabled, extension logs can still be found in the Output Panel under **GitIgnore Assistant**.
 
 ### Sort When Cleaning
 
-Controls whether **`Clean .gitignore`** sorts entries alphabetically (`true` by default). Set to `false` to keep the existing order while still removing duplicates and empty lines.
+Controls whether **Clean** command sorts entries alphabetically (`true` by default). Set to `false` to keep the existing order while still removing duplicates and empty lines.
