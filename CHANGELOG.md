@@ -1,3 +1,6 @@
+### 1.0.5 - 2025-10-08
+- Add base entries before sorting when cleanning `.gitignore`
+
 ### 1.0.4 - 2025-10-08
 - Remove unnecessary refresh of Explorer and Source Control views after `.gitignore` updates
 

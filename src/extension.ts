@@ -222,15 +222,16 @@ function cleanGitignoreEntries(
 
 	const duplicatesRemoved = entries.length - deduped.length;
 
+	const baseEntriesApplied = [...deduped];
+	const baseEntriesAdded = enforceBaseEntries(baseEntriesApplied, baseEntries);
+
 	let sortedApplied = false;
-	let finalEntries = deduped;
+	let finalEntries = baseEntriesApplied;
 	if (options.sort) {
-		const sorted = [...deduped].sort((left, right) => left.localeCompare(right));
-		sortedApplied = !arraysEqual(deduped, sorted);
+		const sorted = [...baseEntriesApplied].sort((left, right) => left.localeCompare(right));
+		sortedApplied = !arraysEqual(baseEntriesApplied, sorted);
 		finalEntries = sorted;
 	}
-
-	const baseEntriesAdded = enforceBaseEntries(finalEntries, baseEntries);
 
 	return {
 		lines: [...finalEntries],
