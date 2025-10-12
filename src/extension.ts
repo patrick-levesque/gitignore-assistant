@@ -534,8 +534,16 @@ async function buildEntryForRemove(target: vscode.Uri, workspace: vscode.Workspa
 
 	if (isDirectory === true) {
 		alternates.push(formatGitignoreEntry(relativePath, false));
+
+		const escaped = escapeGitignorePath(relativePath);
+		const withTrailing = escaped.endsWith('/') ? escaped : `${escaped}/`;
+		alternates.push(withTrailing);
 	} else {
 		alternates.push(formatGitignoreEntry(relativePath, true));
+
+		const escaped = escapeGitignorePath(relativePath);
+		const withTrailing = escaped.endsWith('/') ? escaped : `${escaped}/`;
+		alternates.push(withTrailing);
 	}
 
 	return { primary, alternates, relativePath };
@@ -559,7 +567,8 @@ function getRelativePath(target: vscode.Uri, workspace: vscode.WorkspaceFolder):
 function formatGitignoreEntry(relativePath: string, isDirectory: boolean): string {
 	const escaped = escapeGitignorePath(relativePath);
 	if (isDirectory) {
-		return escaped.endsWith('/') ? escaped : `${escaped}/`;
+		const withTrailing = escaped.endsWith('/') ? escaped : `${escaped}/`;
+		return `/${withTrailing}`;
 	}
 	return escaped.endsWith('/') ? escaped.slice(0, -1) : escaped;
 }
