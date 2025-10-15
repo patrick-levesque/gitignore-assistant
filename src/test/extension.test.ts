@@ -53,8 +53,8 @@ suite('GitIgnore Assistant Extension', () => {
 		const content = await readGitignore(folder);
 		assert.ok(content.includes('.DS_Store'), '.gitignore should contain .DS_Store');
 		assert.ok(
-			content.includes('src/add-example.ts'),
-			'.gitignore should contain the relative path for the added file'
+			content.includes('/src/add-example.ts'),
+			'.gitignore should contain an anchored path for the added file'
 		);
 		const lines = content.trim().split('\n');
 		const blankLines = lines.filter((line) => line.trim() === '').length;
@@ -71,14 +71,14 @@ suite('GitIgnore Assistant Extension', () => {
 		await vscode.commands.executeCommand('gitignore-assistant.addToGitignore', ignoredFolder);
 		let content = await readGitignore(folder);
 		assert.ok(
-			content.includes('assets/ignored/'),
-			'.gitignore should contain the folder entry before removal'
+			content.includes('/assets/ignored/'),
+			'.gitignore should contain the anchored folder entry before removal'
 		);
 
 		await vscode.commands.executeCommand('gitignore-assistant.removeFromGitignore', ignoredFolder);
 		content = await readGitignore(folder);
 		assert.ok(content.includes('.DS_Store'), '.gitignore should still contain .DS_Store');
-		assert.ok(!content.includes('assets/ignored/'), '.gitignore should not contain the removed folder entry');
+		assert.ok(!content.includes('/assets/ignored/'), '.gitignore should not contain the removed folder entry');
 		const linesAfterRemoval = content.trim().split('\n');
 		const blankLinesAfterRemoval = linesAfterRemoval.filter((line) => line.trim() === '').length;
 		assert.strictEqual(
@@ -96,12 +96,32 @@ suite('GitIgnore Assistant Extension', () => {
 		await vscode.commands.executeCommand('gitignore-assistant.addToGitignore', duplicateFile);
 		await vscode.commands.executeCommand('gitignore-assistant.addToGitignore', duplicateFile);
 
-		const content = await readGitignore(folder);
-		const occurrences = content
-			.split('\n')
-			.filter((line) => line.trim() === 'logs/app.log').length;
+	    const content = await readGitignore(folder);
+	    const occurrences = content
+		    .split('\n')
+		    .filter((line) => line.trim() === '/logs/app.log').length;
 		assert.strictEqual(occurrences, 1, 'Duplicate entries should not be added to .gitignore');
 	});
+
+		test('Add command respects addWithLeadingSlash setting', async function () {
+			this.timeout(10000);
+			const folder = ensureWorkspace();
+			const configuration = vscode.workspace.getConfiguration('gitignoreAssistant', folder.uri);
+			const previous = configuration.get<boolean>('addWithLeadingSlash');
+			await configuration.update('addWithLeadingSlash', false, vscode.ConfigurationTarget.WorkspaceFolder);
+
+			try {
+				const fileUri = await createFile(folder, 'src/unanchored.ts');
+				await vscode.commands.executeCommand('gitignore-assistant.addToGitignore', fileUri);
+
+				const content = await readGitignore(folder);
+				const lines = content.trim().split('\n');
+				assert.ok(lines.includes('src/unanchored.ts'), 'Entry should not be anchored when setting is disabled');
+				assert.ok(!lines.includes('/src/unanchored.ts'), 'Anchored variant should be omitted when setting is disabled');
+			} finally {
+				await configuration.update('addWithLeadingSlash', previous, vscode.ConfigurationTarget.WorkspaceFolder);
+			}
+		});
 
 	test('Clean command removes duplicates, empty lines, and sorts entries', async function () {
 		this.timeout(10000);
@@ -110,16 +130,56 @@ suite('GitIgnore Assistant Extension', () => {
 		const initialContent = ['# comment', '', 'node_modules/', 'dist/', 'node_modules/', 'build/', '', 'build/'].join('\n');
 		await vscode.workspace.fs.writeFile(gitignoreUri, textEncoder.encode(`${initialContent}\n`));
 
-		await vscode.commands.executeCommand('gitignore-assistant.cleanGitignore');
+		const configuration = vscode.workspace.getConfiguration('gitignoreAssistant', folder.uri);
+		const prevRemoveEmpty = configuration.get<boolean>('removeEmptyLines');
+		const prevRemoveComments = configuration.get<boolean>('removeComments');
+		const prevSort = configuration.get<boolean>('sortWhenCleaning');
 
-		const cleaned = await readGitignore(folder);
-		const lines = cleaned.trim().split('\n');
-		assert.deepStrictEqual(
-			lines,
-			['.DS_Store', '# comment', 'build/', 'dist/', 'node_modules/'],
-			'Clean command should remove duplicates, empty lines, and sort entries alphabetically'
-		);
+		await configuration.update('removeEmptyLines', true, vscode.ConfigurationTarget.WorkspaceFolder);
+		await configuration.update('removeComments', true, vscode.ConfigurationTarget.WorkspaceFolder);
+		await configuration.update('sortWhenCleaning', true, vscode.ConfigurationTarget.WorkspaceFolder);
+
+		try {
+			await vscode.commands.executeCommand('gitignore-assistant.cleanGitignore');
+			const cleaned = await readGitignore(folder);
+			const lines = cleaned.trim().split('\n');
+			assert.deepStrictEqual(
+				lines,
+				['.DS_Store', 'build/', 'dist/', 'node_modules/'],
+				'Clean command should remove duplicates, empty lines, comments, and sort entries alphabetically when enabled'
+			);
+		} finally {
+			await configuration.update('removeEmptyLines', prevRemoveEmpty, vscode.ConfigurationTarget.WorkspaceFolder);
+			await configuration.update('removeComments', prevRemoveComments, vscode.ConfigurationTarget.WorkspaceFolder);
+			await configuration.update('sortWhenCleaning', prevSort, vscode.ConfigurationTarget.WorkspaceFolder);
+		}
 	});
+
+		test('Clean command preserves comments and empty lines by default', async function () {
+			this.timeout(10000);
+			const folder = ensureWorkspace();
+			const gitignoreUri = vscode.Uri.joinPath(folder.uri, '.gitignore');
+			const initial = ['# keep me', '', 'dist/', '', 'dist/', 'logs/app.log', 'logs/app.log'].join('\n');
+			await vscode.workspace.fs.writeFile(gitignoreUri, textEncoder.encode(`${initial}\n`));
+
+			const configuration = vscode.workspace.getConfiguration('gitignoreAssistant', folder.uri);
+			const prevSort = configuration.get<boolean>('sortWhenCleaning');
+			await configuration.update('sortWhenCleaning', false, vscode.ConfigurationTarget.WorkspaceFolder);
+
+			try {
+				await vscode.commands.executeCommand('gitignore-assistant.cleanGitignore');
+
+				const cleaned = await readGitignore(folder);
+				const lines = cleaned.trim().split('\n');
+				assert.deepStrictEqual(
+					lines,
+					['.DS_Store', '# keep me', '', 'dist/', '', 'logs/app.log'],
+					'Clean command should keep comments and empty lines when removal settings are disabled'
+				);
+			} finally {
+				await configuration.update('sortWhenCleaning', prevSort, vscode.ConfigurationTarget.WorkspaceFolder);
+			}
+		});
 
 	test('Clean command respects sorting setting', async function () {
 		this.timeout(10000);
@@ -128,9 +188,9 @@ suite('GitIgnore Assistant Extension', () => {
 		const initialContent = ['node_modules/', 'dist/', 'build/', 'dist/'].join('\n');
 		await vscode.workspace.fs.writeFile(gitignoreUri, textEncoder.encode(`${initialContent}\n`));
 
-		const configuration = vscode.workspace.getConfiguration('gitignoreAssistant');
+		const configuration = vscode.workspace.getConfiguration('gitignoreAssistant', folder.uri);
 		const previousValue = configuration.get<boolean>('sortWhenCleaning');
-		await configuration.update('sortWhenCleaning', false, vscode.ConfigurationTarget.Workspace);
+		await configuration.update('sortWhenCleaning', false, vscode.ConfigurationTarget.WorkspaceFolder);
 
 		try {
 			await vscode.commands.executeCommand('gitignore-assistant.cleanGitignore');
@@ -142,9 +202,104 @@ suite('GitIgnore Assistant Extension', () => {
 				'Clean command should preserve original order when sorting is disabled'
 			);
 		} finally {
-			await configuration.update('sortWhenCleaning', previousValue, vscode.ConfigurationTarget.Workspace);
+			await configuration.update('sortWhenCleaning', previousValue, vscode.ConfigurationTarget.WorkspaceFolder);
 		}
 	});
+
+		test('Trailing slash for folders setting is respected', async function () {
+			this.timeout(10000);
+			const folder = ensureWorkspace();
+			const config = vscode.workspace.getConfiguration('gitignoreAssistant', folder.uri);
+			const prev = config.get<boolean>('trailingSlashForFolders');
+			await config.update('trailingSlashForFolders', false, vscode.ConfigurationTarget.WorkspaceFolder);
+			try {
+				const dir = vscode.Uri.joinPath(folder.uri, 'build');
+				await vscode.workspace.fs.createDirectory(dir);
+				await vscode.commands.executeCommand('gitignore-assistant.addToGitignore', dir);
+						const content = await readGitignore(folder);
+						const lines = content.trim().split('\n');
+						assert.ok(
+							lines.includes('/build'),
+							'Folder entry at root should be anchored and should not have a trailing slash when disabled'
+						);
+			} finally {
+				await config.update('trailingSlashForFolders', prev, vscode.ConfigurationTarget.WorkspaceFolder);
+			}
+		});
+
+		test('Root anchoring rules are applied', async function () {
+			this.timeout(10000);
+			const folder = ensureWorkspace();
+			// Root dotfile should NOT be anchored
+			const envFile = vscode.Uri.joinPath(folder.uri, '.env');
+			await vscode.workspace.fs.writeFile(envFile, textEncoder.encode(''));
+			await vscode.commands.executeCommand('gitignore-assistant.addToGitignore', envFile);
+
+			// Root folder and dotfolder should be anchored
+			const vscodeDir = vscode.Uri.joinPath(folder.uri, '.vscode');
+			await vscode.workspace.fs.createDirectory(vscodeDir);
+			await vscode.commands.executeCommand('gitignore-assistant.addToGitignore', vscodeDir);
+
+			// Root regular file should be anchored
+			const pkgFile = vscode.Uri.joinPath(folder.uri, 'package.json');
+			await vscode.workspace.fs.writeFile(pkgFile, textEncoder.encode('{}'));
+			await vscode.commands.executeCommand('gitignore-assistant.addToGitignore', pkgFile);
+
+			const content = await readGitignore(folder);
+			const lines = content.trim().split('\n');
+			assert.ok(lines.includes('.env'), 'Root dotfile should not be prefixed with /');
+			assert.ok(lines.includes('/.vscode/'), 'Root dotfolder should be prefixed with / and end with /');
+			assert.ok(lines.includes('/package.json'), 'Root file should be prefixed with /');
+		});
+
+		test('Patterns are preserved during clean', async function () {
+			this.timeout(10000);
+			const folder = ensureWorkspace();
+			const gitignoreUri = vscode.Uri.joinPath(folder.uri, '.gitignore');
+			const initial = ['*.log', '!important.log', '**/cache/*', 'dist/'].join('\n');
+			await vscode.workspace.fs.writeFile(gitignoreUri, textEncoder.encode(`${initial}\n`));
+			await vscode.commands.executeCommand('gitignore-assistant.cleanGitignore');
+			const cleaned = await readGitignore(folder);
+			const lines = cleaned.trim().split('\n');
+			assert.ok(lines.includes('*.log'), 'Glob pattern should be preserved');
+			assert.ok(lines.includes('!important.log'), 'Negation pattern should be preserved');
+			assert.ok(lines.includes('**/cache/*'), 'Double-star pattern should be preserved');
+		});
+
+				test('Auth.json anchored and unanchored are de-duplicated without adding leading / to files when cleaning', async function () {
+				this.timeout(10000);
+				const folder = ensureWorkspace();
+				const gitignoreUri = vscode.Uri.joinPath(folder.uri, '.gitignore');
+				const initial = ['auth.json', '/auth.json'].join('\n');
+				await vscode.workspace.fs.writeFile(gitignoreUri, textEncoder.encode(`${initial}\n`));
+				await vscode.commands.executeCommand('gitignore-assistant.cleanGitignore');
+				const cleaned = await readGitignore(folder);
+				const lines = cleaned.trim().split('\n');
+					assert.ok(lines.includes('auth.json'), 'Canonical file should not be anchored when cleaning');
+					const occurrences = lines.filter((l) => l === 'auth.json').length;
+				assert.strictEqual(occurrences, 1, 'Should keep a single canonical file entry');
+			});
+
+			test('Trailing slash duplicates are not counted when disabled', async function () {
+				this.timeout(10000);
+				const folder = ensureWorkspace();
+				const config = vscode.workspace.getConfiguration('gitignoreAssistant', folder.uri);
+				const prev = config.get<boolean>('trailingSlashForFolders');
+				await config.update('trailingSlashForFolders', false, vscode.ConfigurationTarget.WorkspaceFolder);
+				try {
+					const gitignoreUri = vscode.Uri.joinPath(folder.uri, '.gitignore');
+					const initial = ['/node_modules', '/node_modules/'].join('\n');
+					await vscode.workspace.fs.writeFile(gitignoreUri, textEncoder.encode(`${initial}\n`));
+					await vscode.commands.executeCommand('gitignore-assistant.cleanGitignore');
+					const cleaned = await readGitignore(folder);
+					const lines = cleaned.trim().split('\n');
+					assert.ok(lines.includes('/node_modules'), 'Canonical folder should not include trailing slash when disabled');
+					const occurrences = lines.filter((l) => l === '/node_modules').length;
+					assert.strictEqual(occurrences, 1, 'Should keep a single canonical folder entry');
+				} finally {
+					await config.update('trailingSlashForFolders', prev, vscode.ConfigurationTarget.WorkspaceFolder);
+				}
+			});
 
 	test('Clean command runs on root .gitignore when invoked with resource', async function () {
 		this.timeout(10000);
@@ -152,15 +307,23 @@ suite('GitIgnore Assistant Extension', () => {
 		const gitignoreUri = vscode.Uri.joinPath(folder.uri, '.gitignore');
 		await vscode.workspace.fs.writeFile(gitignoreUri, textEncoder.encode('dist/\n\nnode_modules/\n'));
 
-		await vscode.commands.executeCommand('gitignore-assistant.cleanGitignore', gitignoreUri);
+		const configuration = vscode.workspace.getConfiguration('gitignoreAssistant', folder.uri);
+		const prevSort = configuration.get<boolean>('sortWhenCleaning');
+		await configuration.update('sortWhenCleaning', false, vscode.ConfigurationTarget.WorkspaceFolder);
 
-		const cleaned = await readGitignore(folder);
-		const lines = cleaned.trim().split('\n');
-		assert.deepStrictEqual(
-			lines,
-			['.DS_Store', 'dist/', 'node_modules/'],
-			'Clean command should process root .gitignore when invoked from the editor context menu'
-		);
+		try {
+			await vscode.commands.executeCommand('gitignore-assistant.cleanGitignore', gitignoreUri);
+
+			const cleaned = await readGitignore(folder);
+			const lines = cleaned.trim().split('\n');
+			assert.deepStrictEqual(
+				lines,
+				['.DS_Store', 'dist/', '', 'node_modules/'],
+				'Clean command should process root .gitignore when invoked from the editor context menu'
+			);
+		} finally {
+			await configuration.update('sortWhenCleaning', prevSort, vscode.ConfigurationTarget.WorkspaceFolder);
+		}
 	});
 
 	test('Clean command ignores non-root .gitignore resources', async function () {

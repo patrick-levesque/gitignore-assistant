@@ -4,7 +4,7 @@
   "displayName": "GitIgnore Assistant",
   "description": "Easily add, remove, or clean entries in your .gitignore",
   "icon": "images/gitignore-assistant.png",
-  "version": "1.0.5",
+  "version": "1.1.0",
   "author": "Patrick Levesque",
   "license": "MIT",
   "galleryBanner": {
@@ -55,11 +55,6 @@
           "command": "gitignore-assistant.removeFromGitignore",
           "when": "resourceScheme == 'file'",
           "group": "1_gitignore-assistant@2"
-        },
-        {
-          "command": "gitignore-assistant.cleanGitignore",
-          "when": "resourceScheme == 'file'",
-          "group": "1_gitignore-assistant@3"
         }
       ],
       "editor/context": [
@@ -73,17 +68,8 @@
     "configuration": {
       "title": "GitIgnore Assistant",
       "properties": {
-        "gitignoreAssistant.showNotifications": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show information and warning notifications when .gitignore is updated."
-        },
-        "gitignoreAssistant.sortWhenCleaning": {
-          "type": "boolean",
-          "default": true,
-          "description": "Sort .gitignore entries alphabetically when running Clean .gitignore."
-        },
         "gitignoreAssistant.baseEntries": {
+          "order": 1,
           "type": "array",
           "scope": "resource",
           "default": [
@@ -92,7 +78,49 @@
           "items": {
             "type": "string"
           },
-          "markdownDescription": "Entries that should always be present in workspace .gitignore files. Set to an empty array to disable base entries."
+          "markdownDescription": "Entries that should always be present in workspace .gitignore files."
+        },
+        "gitignoreAssistant.addWithLeadingSlash": {
+          "order": 2,
+          "type": "boolean",
+          "scope": "resource",
+          "default": true,
+          "description": "Ensure file and folder entries start with a leading slash (e.g. /node_modules), except for single root dotfiles (e.g. `.env`, `.DS_Store`)."
+        },
+        "gitignoreAssistant.trailingSlashForFolders": {
+          "order": 3,
+          "type": "boolean",
+          "scope": "resource",
+          "default": true,
+          "description": "Ensure folder entries end with a trailing slash (e.g. /node_modules/)."
+        },
+        "gitignoreAssistant.removeEmptyLines": {
+          "order": 4,
+          "type": "boolean",
+          "scope": "resource",
+          "default": false,
+          "description": "Remove empty lines when running Clean command."
+        },
+        "gitignoreAssistant.removeComments": {
+          "order": 5,
+          "type": "boolean",
+          "scope": "resource",
+          "default": false,
+          "description": "Remove comments when running Clean command."
+        },
+        "gitignoreAssistant.sortWhenCleaning": {
+          "order": 6,
+          "type": "boolean",
+          "scope": "resource",
+          "default": false,
+          "description": "Sort .gitignore entries alphabetically when running Clean command."
+        },
+        "gitignoreAssistant.showNotifications": {
+          "order": 7,
+          "type": "boolean",
+          "scope": "resource",
+          "default": true,
+          "description": "Show information and warning notifications when .gitignore is updated."
         }
       }
     }

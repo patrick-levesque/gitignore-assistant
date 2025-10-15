@@ -158,9 +158,22 @@ async function handleCleanGitignoreCommand(resourceUri?: vscode.Uri): Promise<vo
 	}
 
 	const originalLines = parseLines(content);
-	const sortEntries = shouldSortWhenCleaning();
+	const sortEntries = shouldSortWhenCleaning(workspace);
+	const removeEmptyLines = shouldRemoveEmptyLines(workspace);
+	const removeComments = shouldRemoveComments(workspace);
+	const trailingSlash = shouldUseTrailingSlashForFolders(workspace);
 	const baseEntries = getBaseEntries(workspace);
-	const result = cleanGitignoreEntries(originalLines, { sort: sortEntries }, baseEntries);
+	const result = await cleanGitignoreEntries(
+		originalLines,
+		{
+			sort: sortEntries,
+			removeEmptyLines,
+			removeComments,
+			trailingSlashForFolders: trailingSlash,
+			workspace
+		},
+		baseEntries
+	);
 	const changed = !arraysEqual(originalLines, result.lines);
 
 	if (!changed) {
@@ -199,46 +212,138 @@ interface CleanGitignoreResult {
 	emptyLinesRemoved: number;
 	sortedApplied: boolean;
 	baseEntriesAdded: boolean;
+	commentsRemoved: number;
 }
 
-function cleanGitignoreEntries(
+async function cleanGitignoreEntries(
 	lines: string[],
-	options: { sort: boolean },
+	options: {
+		sort: boolean;
+		removeEmptyLines: boolean;
+		removeComments: boolean;
+		trailingSlashForFolders: boolean;
+		workspace?: vscode.WorkspaceFolder;
+	},
 	baseEntries: string[]
-): CleanGitignoreResult {
+): Promise<CleanGitignoreResult> {
 	const trimmed = lines.map((line) => line.trim());
-	const entries = trimmed.filter((line) => line !== '');
-	const emptyLinesRemoved = trimmed.length - entries.length;
-	const seen = new Set<string>();
-	const deduped: string[] = [];
+	const isComment = (line: string) => line.startsWith('#');
+	const isEmpty = (line: string) => line === '';
 
-	for (const entry of entries) {
-		if (seen.has(entry)) {
+	const originalEmptyCount = trimmed.filter(isEmpty).length;
+	const originalCommentCount = trimmed.filter(isComment).length;
+
+	const keptLines = trimmed.filter((line) => {
+		if (options.removeEmptyLines && isEmpty(line)) {
+			return false;
+		}
+		if (options.removeComments && isComment(line)) {
+			return false;
+		}
+		return true;
+	});
+
+	type EntryMeta = { hasFolderSyntax: boolean; existsAsDirectory?: boolean };
+	const metaByKey = new Map<string, EntryMeta>();
+	const toKey = (line: string) => stripAnchorsAndSlashes(line);
+
+	const keysToDetect = new Set<string>();
+	for (const line of keptLines) {
+		if (isEmpty(line) || isComment(line) || isPatternLine(line)) {
 			continue;
 		}
-		seen.add(entry);
-		deduped.push(entry);
+		const key = toKey(line);
+		const current = metaByKey.get(key) ?? { hasFolderSyntax: false };
+		if (line.endsWith('/')) {
+			current.hasFolderSyntax = true;
+		}
+		metaByKey.set(key, current);
+		if (!current.hasFolderSyntax && options.workspace) {
+			keysToDetect.add(key);
+		}
 	}
 
-	const duplicatesRemoved = entries.length - deduped.length;
+	if (options.workspace && keysToDetect.size) {
+		const detections = await detectDirectoriesForKeys(keysToDetect, options.workspace);
+		for (const [key, isDir] of detections) {
+			const meta = metaByKey.get(key);
+			if (meta) {
+				meta.existsAsDirectory = isDir;
+			}
+		}
+	}
 
-	const baseEntriesApplied = [...deduped];
-	const baseEntriesAdded = enforceBaseEntries(baseEntriesApplied, baseEntries);
+	const normalized: string[] = [];
+	const seenEntryKeys = new Set<string>();
+	const seenPatternKeys = new Set<string>();
+	const firstVariantByKey = new Map<string, { trailingSlash: boolean; anchored: boolean }>();
+	let duplicatesRemoved = 0;
 
+	for (const line of keptLines) {
+		if (isEmpty(line)) {
+			normalized.push('');
+			continue;
+		}
+		if (isComment(line)) {
+			normalized.push(line);
+			continue;
+		}
+		if (isPatternLine(line)) {
+			if (seenPatternKeys.has(line)) {
+				duplicatesRemoved += 1;
+				continue;
+			}
+			seenPatternKeys.add(line);
+			normalized.push(line);
+			continue;
+		}
+
+		const key = toKey(line);
+		const variant = { trailingSlash: line.endsWith('/'), anchored: line.startsWith('/') };
+		if (seenEntryKeys.has(key)) {
+			const first = firstVariantByKey.get(key);
+			const onlyTrailingSlashDiff =
+				!!first && first.trailingSlash !== variant.trailingSlash && options.trailingSlashForFolders === false;
+			if (!onlyTrailingSlashDiff) {
+				duplicatesRemoved += 1;
+			}
+			continue;
+		}
+
+		const meta = metaByKey.get(key);
+		const isFolderForKey = !!(meta?.hasFolderSyntax || meta?.existsAsDirectory);
+		firstVariantByKey.set(key, variant);
+		seenEntryKeys.add(key);
+
+		const canonical = buildCanonicalFromKey(key, isFolderForKey, variant, options);
+		normalized.push(canonical);
+	}
+
+	const commentsRemoved = options.removeComments ? originalCommentCount : 0;
+	const emptyLinesRemoved = options.removeEmptyLines ? originalEmptyCount : 0;
+
+	const baseApplied = [...normalized];
+	const baseEntriesAdded = enforceBaseEntries(baseApplied, baseEntries);
+
+	let finalLines = baseApplied;
 	let sortedApplied = false;
-	let finalEntries = baseEntriesApplied;
 	if (options.sort) {
-		const sorted = [...baseEntriesApplied].sort((left, right) => left.localeCompare(right));
-		sortedApplied = !arraysEqual(baseEntriesApplied, sorted);
-		finalEntries = sorted;
+		const sorted = [...baseApplied].sort((left, right) => left.localeCompare(right));
+		sortedApplied = !arraysEqual(baseApplied, sorted);
+		finalLines = sorted;
 	}
+
+	const preparedLines = options.removeEmptyLines
+		? cleanupLines(finalLines, { collapseEmpty: true, trimTrailing: true })
+		: [...finalLines];
 
 	return {
-		lines: [...finalEntries],
+		lines: preparedLines,
 		duplicatesRemoved,
 		emptyLinesRemoved,
 		sortedApplied,
-		baseEntriesAdded
+		baseEntriesAdded,
+		commentsRemoved
 	};
 }
 
@@ -262,8 +367,22 @@ function isRootGitignoreDocument(document: vscode.TextDocument | undefined): boo
 	return relative === '.gitignore';
 }
 
-function shouldSortWhenCleaning(): boolean {
-	return vscode.workspace.getConfiguration('gitignoreAssistant').get<boolean>('sortWhenCleaning', true);
+function shouldSortWhenCleaning(workspace?: vscode.WorkspaceFolder): boolean {
+	return vscode.workspace
+		.getConfiguration('gitignoreAssistant', workspace?.uri)
+		.get<boolean>('sortWhenCleaning', false);
+}
+
+function shouldRemoveEmptyLines(workspace?: vscode.WorkspaceFolder): boolean {
+	return vscode.workspace
+		.getConfiguration('gitignoreAssistant', workspace?.uri)
+		.get<boolean>('removeEmptyLines', false);
+}
+
+function shouldRemoveComments(workspace?: vscode.WorkspaceFolder): boolean {
+	return vscode.workspace
+		.getConfiguration('gitignoreAssistant', workspace?.uri)
+		.get<boolean>('removeComments', false);
 }
 
 function getBaseEntries(workspace?: vscode.WorkspaceFolder): string[] {
@@ -309,6 +428,10 @@ function presentCleaningSummary(workspace: vscode.WorkspaceFolder, result: Clean
 	if (result.emptyLinesRemoved) {
 		const suffix = result.emptyLinesRemoved === 1 ? '' : 's';
 		updates.push(`${result.emptyLinesRemoved} empty line${suffix}`);
+	}
+	if (result.commentsRemoved) {
+		const suffix = result.commentsRemoved === 1 ? '' : 's';
+		updates.push(`${result.commentsRemoved} comment${suffix}`);
 	}
 	if (result.sortedApplied) {
 		updates.push('sorted alphabetically');
@@ -512,7 +635,7 @@ async function buildEntryForAdd(target: vscode.Uri, workspace: vscode.WorkspaceF
 	const relativePath = getRelativePath(target, workspace);
 	const stat = await vscode.workspace.fs.stat(target);
 	const isDirectory = (stat.type & vscode.FileType.Directory) === vscode.FileType.Directory;
-	const entry = formatGitignoreEntry(relativePath, isDirectory);
+	const entry = formatGitignoreEntry(relativePath, isDirectory, workspace);
 	return { entry, relativePath, isDirectory };
 }
 
@@ -529,21 +652,26 @@ async function buildEntryForRemove(target: vscode.Uri, workspace: vscode.Workspa
 	}
 
 	const isDirectory = stat ? (stat.type & vscode.FileType.Directory) === vscode.FileType.Directory : undefined;
-	const primary = formatGitignoreEntry(relativePath, isDirectory === true);
+	const primary = formatGitignoreEntry(relativePath, isDirectory === true, workspace);
 	const alternates: string[] = [];
 
 	if (isDirectory === true) {
-		alternates.push(formatGitignoreEntry(relativePath, false));
-
+		// Match common variants
+		alternates.push(formatGitignoreEntry(relativePath, false, workspace)); // as file
 		const escaped = escapeGitignorePath(relativePath);
 		const withTrailing = escaped.endsWith('/') ? escaped : `${escaped}/`;
-		alternates.push(withTrailing);
+		alternates.push(withTrailing); // non-root anchored folder
+		alternates.push(`/${withTrailing}`); // root anchored folder
+		alternates.push(escaped); // non-root anchored folder without trailing slash
+		alternates.push(`/${escaped}`); // root anchored without trailing slash
 	} else {
-		alternates.push(formatGitignoreEntry(relativePath, true));
-
+		alternates.push(formatGitignoreEntry(relativePath, true, workspace)); // as folder
 		const escaped = escapeGitignorePath(relativePath);
 		const withTrailing = escaped.endsWith('/') ? escaped : `${escaped}/`;
-		alternates.push(withTrailing);
+		alternates.push(withTrailing); // non-root anchored with slash
+		alternates.push(`/${withTrailing}`); // root anchored with slash
+		alternates.push(escaped); // non-root anchored file
+		alternates.push(`/${escaped}`); // root anchored file
 	}
 
 	return { primary, alternates, relativePath };
@@ -564,13 +692,36 @@ function getRelativePath(target: vscode.Uri, workspace: vscode.WorkspaceFolder):
 	return normalized;
 }
 
-function formatGitignoreEntry(relativePath: string, isDirectory: boolean): string {
+function formatGitignoreEntry(relativePath: string, isDirectory: boolean, workspace?: vscode.WorkspaceFolder): string {
 	const escaped = escapeGitignorePath(relativePath);
-	if (isDirectory) {
-		const withTrailing = escaped.endsWith('/') ? escaped : `${escaped}/`;
-		return `/${withTrailing}`;
+	const trailingSlash = shouldUseTrailingSlashForFolders(workspace);
+	const addLeadingSlash = shouldAddWithLeadingSlash(workspace);
+	const rootLevel = isRootLevelPath(relativePath);
+	const core = escaped.replace(/^\/+/g, '');
+	const isRootDotfile = !isDirectory && rootLevel && core.startsWith('.');
+
+	let normalized = isDirectory
+		? (() => {
+			const withoutTrailing = core.replace(/\/+$/g, '');
+			return trailingSlash ? `${withoutTrailing}/` : withoutTrailing;
+		})()
+		: core.replace(/\/+$/g, '');
+
+	if (addLeadingSlash && !isRootDotfile) {
+		normalized = normalized.startsWith('/') ? normalized : `/${normalized}`;
+	} else {
+		normalized = normalized.replace(/^\/+/g, '');
 	}
-	return escaped.endsWith('/') ? escaped.slice(0, -1) : escaped;
+
+	if (!isDirectory) {
+		normalized = normalized.replace(/\/+$/g, '');
+	}
+
+	return normalized;
+}
+
+function isRootLevelPath(relativePath: string): boolean {
+	return !relativePath.includes('/');
 }
 
 function escapeGitignorePath(value: string): string {
@@ -580,6 +731,80 @@ function escapeGitignorePath(value: string): string {
 		}
 		return `\\${match}`;
 	});
+}
+
+function shouldUseTrailingSlashForFolders(workspace?: vscode.WorkspaceFolder): boolean {
+	return vscode.workspace
+		.getConfiguration('gitignoreAssistant', workspace?.uri)
+		.get<boolean>('trailingSlashForFolders', true);
+}
+
+function shouldAddWithLeadingSlash(workspace?: vscode.WorkspaceFolder): boolean {
+	return vscode.workspace
+		.getConfiguration('gitignoreAssistant', workspace?.uri)
+		.get<boolean>('addWithLeadingSlash', true);
+}
+
+function isPatternLine(line: string): boolean {
+	// Treat as pattern if it contains globbing or negation characters
+	return /(^!|\*|\?|\[|\]|\*\*)/.test(line);
+}
+
+function stripAnchorsAndSlashes(line: string): string {
+	// Remove leading slash (anchor) and trailing slashes for keying
+	let value = line.replace(/^\/+/, '');
+	value = value.replace(/\/+$/, '');
+	return value;
+}
+
+function buildCanonicalFromKey(
+	key: string,
+	isFolder: boolean,
+	variant: { trailingSlash: boolean; anchored: boolean },
+	options: { trailingSlashForFolders: boolean }
+): string {
+	if (isPatternLine(key)) {
+		return key;
+	}
+
+	const rootDotfile = !isFolder && !key.includes('/') && key.startsWith('.');
+	const normalizedKey = key.replace(/\/+$/g, '');
+
+	if (isFolder) {
+		const anchoredBase = variant.anchored ? `/${normalizedKey}` : normalizedKey;
+		if (options.trailingSlashForFolders || variant.trailingSlash) {
+			return anchoredBase.endsWith('/') ? anchoredBase : `${anchoredBase}/`;
+		}
+		return anchoredBase.replace(/\/+$/g, '');
+	}
+
+	if (rootDotfile) {
+		return normalizedKey;
+	}
+
+	const anchoredBase = variant.anchored ? `/${normalizedKey}` : normalizedKey;
+	return anchoredBase.replace(/\/+$/g, '');
+}
+
+async function detectDirectoriesForKeys(keys: Set<string>, workspace: vscode.WorkspaceFolder): Promise<Map<string, boolean>> {
+	const results = new Map<string, boolean>();
+	await Promise.all(
+		Array.from(keys).map(async (key) => {
+			const unescaped = unescapeGitignorePath(key);
+			const uri = vscode.Uri.joinPath(workspace.uri, unescaped);
+			try {
+				const stat = await vscode.workspace.fs.stat(uri);
+				results.set(key, (stat.type & vscode.FileType.Directory) === vscode.FileType.Directory);
+			} catch {
+				results.set(key, false);
+			}
+		})
+	);
+	return results;
+}
+
+function unescapeGitignorePath(value: string): string {
+	return value.replace(/\\([ #!])/g, '$1');
 }
 
 function parseLines(content: string): string[] {
@@ -595,23 +820,29 @@ function parseLines(content: string): string[] {
 }
 
 function serializeLines(lines: string[]): string {
-	const cleaned = cleanupLines(lines);
-	if (!cleaned.length) {
+	if (!lines.length) {
 		return '';
 	}
-	return `${cleaned.join('\n')}\n`;
+	return `${lines.join('\n')}\n`;
 }
 
-function cleanupLines(lines: string[]): string[] {
+function cleanupLines(
+	lines: string[],
+	options: { collapseEmpty?: boolean; trimTrailing?: boolean } = {}
+): string[] {
+	const collapseEmpty = options.collapseEmpty ?? true;
+	const trimTrailing = options.trimTrailing ?? true;
 	const cleaned: string[] = [];
 	for (const line of lines) {
-		if (line.trim() === '' && cleaned.length && cleaned[cleaned.length - 1].trim() === '') {
+		if (collapseEmpty && line.trim() === '' && cleaned.length && cleaned[cleaned.length - 1].trim() === '') {
 			continue;
 		}
 		cleaned.push(line);
 	}
-	while (cleaned.length && cleaned[cleaned.length - 1].trim() === '') {
-		cleaned.pop();
+	if (trimTrailing) {
+		while (cleaned.length && cleaned[cleaned.length - 1].trim() === '') {
+			cleaned.pop();
+		}
 	}
 	return cleaned;
 }

@@ -1,5 +1,12 @@
+### 1.1.0 - 2025-10-14
+- Implement Git best-practice formatting
+- Add settings to control leading and trailing slashes for files and folder entries
+- Add settings to remove empty lines and comments when cleaning `.gitignore`
+- Update default settings to preserve existing formatting
+- Update README
+
 ### 1.0.5 - 2025-10-08
-- Add base entries before sorting when cleanning `.gitignore`
+- Ensure base entries are present before sorting when cleaning `.gitignore`
 
 ### 1.0.4 - 2025-10-08
 - Remove unnecessary refresh of Explorer and Source Control views after `.gitignore` updates
