@@ -258,7 +258,8 @@ async function cleanGitignoreEntries(
 			current.hasFolderSyntax = true;
 		}
 		metaByKey.set(key, current);
-		if (!current.hasFolderSyntax && options.workspace) {
+		// Always detect to distinguish real directories from symlinks
+		if (options.workspace) {
 			keysToDetect.add(key);
 		}
 	}
@@ -311,7 +312,9 @@ async function cleanGitignoreEntries(
 		}
 
 		const meta = metaByKey.get(key);
-		const isFolderForKey = !!(meta?.hasFolderSyntax || meta?.existsAsDirectory);
+		// Prioritize filesystem check: if explicitly false (like symlinks), treat as file
+		const isFolderForKey = meta?.existsAsDirectory === true ||
+		                       (meta?.existsAsDirectory === undefined && !!meta?.hasFolderSyntax);
 		firstVariantByKey.set(key, variant);
 		seenEntryKeys.add(key);
 
@@ -634,9 +637,21 @@ async function loadOrCreateGitignore(
 async function buildEntryForAdd(target: vscode.Uri, workspace: vscode.WorkspaceFolder) {
 	const relativePath = getRelativePath(target, workspace);
 	const stat = await vscode.workspace.fs.stat(target);
-	const isDirectory = (stat.type & vscode.FileType.Directory) === vscode.FileType.Directory;
+	// Git treats symlinks as files, not directories, so don't add trailing slash
+	const isDirectory = isRealDirectory(stat);
 	const entry = formatGitignoreEntry(relativePath, isDirectory, workspace);
 	return { entry, relativePath, isDirectory };
+}
+
+function isSymbolicLink(stat: vscode.FileStat): boolean {
+	return (stat.type & vscode.FileType.SymbolicLink) === vscode.FileType.SymbolicLink;
+}
+
+function isRealDirectory(stat: vscode.FileStat): boolean {
+	const isDir = (stat.type & vscode.FileType.Directory) === vscode.FileType.Directory;
+	const isSymlink = (stat.type & vscode.FileType.SymbolicLink) === vscode.FileType.SymbolicLink;
+	// Git treats symlinks as files, not directories, so exclude them
+	return isDir && !isSymlink;
 }
 
 async function buildEntryForRemove(target: vscode.Uri, workspace: vscode.WorkspaceFolder) {
@@ -651,7 +666,7 @@ async function buildEntryForRemove(target: vscode.Uri, workspace: vscode.Workspa
 		}
 	}
 
-	const isDirectory = stat ? (stat.type & vscode.FileType.Directory) === vscode.FileType.Directory : undefined;
+	const isDirectory = stat ? isRealDirectory(stat) : undefined;
 	const primary = formatGitignoreEntry(relativePath, isDirectory === true, workspace);
 	const alternates: string[] = [];
 
@@ -786,17 +801,19 @@ function buildCanonicalFromKey(
 	return anchoredBase.replace(/\/+$/g, '');
 }
 
-async function detectDirectoriesForKeys(keys: Set<string>, workspace: vscode.WorkspaceFolder): Promise<Map<string, boolean>> {
-	const results = new Map<string, boolean>();
+async function detectDirectoriesForKeys(keys: Set<string>, workspace: vscode.WorkspaceFolder): Promise<Map<string, boolean | undefined>> {
+	const results = new Map<string, boolean | undefined>();
 	await Promise.all(
 		Array.from(keys).map(async (key) => {
 			const unescaped = unescapeGitignorePath(key);
 			const uri = vscode.Uri.joinPath(workspace.uri, unescaped);
 			try {
 				const stat = await vscode.workspace.fs.stat(uri);
-				results.set(key, (stat.type & vscode.FileType.Directory) === vscode.FileType.Directory);
+				// Return true for real directories, false for symlinks/files
+				results.set(key, isRealDirectory(stat));
 			} catch {
-				results.set(key, false);
+				// File doesn't exist - return undefined to preserve user's syntax
+				results.set(key, undefined);
 			}
 		})
 	);

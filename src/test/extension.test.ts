@@ -396,6 +396,98 @@ suite('GitIgnore Assistant Extension', () => {
 		}
 	});
 
+	test('Symlinks are treated as files without trailing slash', async function () {
+		this.timeout(10000);
+
+		// Skip on Windows without symlink permissions
+		if (process.platform === 'win32') {
+			try {
+				const testPath = path.join(tempDir, '.permission-test');
+				await fs.symlink('.', testPath, 'junction');
+				await fs.unlink(testPath);
+			} catch {
+				return this.skip();
+			}
+		}
+
+		const folder = ensureWorkspace();
+
+		// Create a real directory as symlink target
+		const targetDir = vscode.Uri.joinPath(folder.uri, 'storage', 'app', 'public');
+		await vscode.workspace.fs.createDirectory(targetDir);
+
+		// Create a symlink to the directory (like Laravel's public/storage)
+		const publicDir = vscode.Uri.joinPath(folder.uri, 'public');
+		await vscode.workspace.fs.createDirectory(publicDir);
+		const symlinkPath = path.join(publicDir.fsPath, 'storage');
+		const symlinkType = process.platform === 'win32' ? 'junction' : 'dir';
+		await fs.symlink(targetDir.fsPath, symlinkPath, symlinkType);
+		const symlinkUri = vscode.Uri.file(symlinkPath);
+
+		// Add symlink to .gitignore
+		await vscode.commands.executeCommand('gitignore-assistant.addToGitignore', symlinkUri);
+
+		// Verify symlink is treated as a file (no trailing slash)
+		const content = await readGitignore(folder);
+		const lines = content.trim().split('\n');
+		assert.ok(
+			lines.includes('/public/storage'),
+			'Symlink should be added without trailing slash (treated as file)'
+		);
+		assert.ok(
+			!lines.some((line) => line === '/public/storage/'),
+			'Symlink should not have trailing slash (not treated as directory)'
+		);
+	});
+
+	test('Clean command removes trailing slash from symlink entries', async function () {
+		this.timeout(10000);
+
+		// Skip on Windows without symlink permissions
+		if (process.platform === 'win32') {
+			try {
+				const testPath = path.join(tempDir, '.permission-test');
+				await fs.symlink('.', testPath, 'junction');
+				await fs.unlink(testPath);
+			} catch {
+				return this.skip();
+			}
+		}
+
+		const folder = ensureWorkspace();
+
+		// Create a real directory as symlink target (different from first test)
+		const targetDir = vscode.Uri.joinPath(folder.uri, 'app', 'uploads');
+		await vscode.workspace.fs.createDirectory(targetDir);
+
+		// Create a symlink to the directory (different path from first test)
+		const publicDir = vscode.Uri.joinPath(folder.uri, 'public');
+		await vscode.workspace.fs.createDirectory(publicDir);
+		const symlinkPath = path.join(publicDir.fsPath, 'uploads');
+		const symlinkType = process.platform === 'win32' ? 'junction' : 'dir';
+		await fs.symlink(targetDir.fsPath, symlinkPath, symlinkType);
+
+		// Manually create .gitignore with symlink entry WITH trailing slash (incorrect)
+		const gitignoreUri = vscode.Uri.joinPath(folder.uri, '.gitignore');
+		const initialContent = '.DS_Store\n/public/uploads/\n';
+		await vscode.workspace.fs.writeFile(gitignoreUri, textEncoder.encode(initialContent));
+
+		// Run clean command
+		await vscode.commands.executeCommand('gitignore-assistant.cleanGitignore');
+
+		// Verify trailing slash was removed from symlink entry
+		const content = await readGitignore(folder);
+		const lines = content.trim().split('\n');
+		assert.ok(
+			lines.includes('/public/uploads'),
+			'Symlink entry should be cleaned to remove trailing slash'
+		);
+		assert.ok(
+			!lines.some((line) => line === '/public/uploads/'),
+			'Symlink entry should not have trailing slash after cleaning'
+		);
+	});
+
 	function ensureWorkspace(): vscode.WorkspaceFolder {
 		if (!workspaceFolder) {
 			throw new Error('Test workspace not initialized.');

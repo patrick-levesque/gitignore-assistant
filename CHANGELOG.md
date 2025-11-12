@@ -1,3 +1,8 @@
+### 1.1.1 - 2025-11-12
+- Fix symbolic link handling to treat symlinks as files instead of directories
+- Update clean command to remove trailing slashes from symbolic link entries
+- Update README and settings description
+
 ### 1.1.0 - 2025-10-14
 - Implement Git best-practice formatting
 - Add settings to control leading and trailing slashes for files and folder entries

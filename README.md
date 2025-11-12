@@ -11,7 +11,7 @@ A Visual Studio Code extension to easily add, remove, or clean entries in your `
 - Automatically create a `.gitignore` if one does not exist, seeded with the configured base entries.
 - Follow common Git best practices when adding and cleaning entries (can be disabled in settings):
 	- All files and folders are anchored with a leading `/` (e.g. `/package.json`, `/.vscode/`, `/public/build/`), except for single root dotfiles (e.g. `.env`, `.DS_Store`).
-	- Folder entries include a trailing slash (e.g. `/node_modules/`). 
+	- Folder entries include a trailing slash (e.g. `/node_modules/`), except for symbolic links which are treated as files. 
 
 ## Usage
 
@@ -38,7 +38,7 @@ All entries are added with a leading `/` (e.g. `/README.md`, `/public/build`), e
 
 ### Trailing Slash For Folders
 
-Folder entries will be added AND cleaned with a trailing slash (e.g. `/node_modules/`). Enabled by default to follow common Git best practices.
+Folder entries will be added AND cleaned with a trailing slash (e.g. `/node_modules/`), except for symbolic links. Enabled by default to follow common Git best practices.
 
 ### Remove Empty Lines
 
