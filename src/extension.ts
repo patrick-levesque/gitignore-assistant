@@ -635,8 +635,12 @@ async function loadOrCreateGitignore(
 }
 
 async function buildEntryForAdd(target: vscode.Uri, workspace: vscode.WorkspaceFolder) {
-	const relativePath = getRelativePath(target, workspace);
-	const stat = await vscode.workspace.fs.stat(target);
+	// If any ancestor directory is a symlink, add the symlink itself instead
+	const symlinkAncestor = await resolveSymlinkAncestor(target, workspace);
+	const effectiveTarget = symlinkAncestor ?? target;
+
+	const relativePath = getRelativePath(effectiveTarget, workspace);
+	const stat = await vscode.workspace.fs.stat(effectiveTarget);
 	// Git treats symlinks as files, not directories, so don't add trailing slash
 	const isDirectory = isRealDirectory(stat);
 	const entry = formatGitignoreEntry(relativePath, isDirectory, workspace);
@@ -652,6 +656,29 @@ function isRealDirectory(stat: vscode.FileStat): boolean {
 	const isSymlink = (stat.type & vscode.FileType.SymbolicLink) === vscode.FileType.SymbolicLink;
 	// Git treats symlinks as files, not directories, so exclude them
 	return isDir && !isSymlink;
+}
+
+async function resolveSymlinkAncestor(
+	target: vscode.Uri,
+	workspace: vscode.WorkspaceFolder
+): Promise<vscode.Uri | undefined> {
+	const relativePath = path.relative(workspace.uri.fsPath, target.fsPath);
+	const segments = relativePath.split(path.sep);
+
+	// Walk from root toward target, checking each intermediate ancestor
+	for (let i = 0; i < segments.length - 1; i++) {
+		const ancestorUri = vscode.Uri.joinPath(workspace.uri, ...segments.slice(0, i + 1));
+		try {
+			const stat = await vscode.workspace.fs.stat(ancestorUri);
+			if (isSymbolicLink(stat)) {
+				return ancestorUri;
+			}
+		} catch {
+			break;
+		}
+	}
+
+	return undefined;
 }
 
 async function buildEntryForRemove(target: vscode.Uri, workspace: vscode.WorkspaceFolder) {

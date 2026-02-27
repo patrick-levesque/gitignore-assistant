@@ -1,3 +1,6 @@
+### 1.1.2 - 2026-02-27
+- Add symlink ancestor detection: adding a path inside a symlink folder now adds the symlink itself instead of the nested path
+
 ### 1.1.1 - 2025-11-12
 - Fix symbolic link handling to treat symlinks as files instead of directories
 - Update clean command to remove trailing slashes from symbolic link entries

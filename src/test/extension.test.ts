@@ -488,6 +488,99 @@ suite('GitIgnore Assistant Extension', () => {
 		);
 	});
 
+	test('Add command resolves subfolder inside symlink to the symlink itself', async function () {
+		this.timeout(10000);
+
+		// Skip on Windows without symlink permissions
+		if (process.platform === 'win32') {
+			try {
+				const testPath = path.join(tempDir, '.permission-test');
+				await fs.symlink('.', testPath, 'junction');
+				await fs.unlink(testPath);
+			} catch {
+				return this.skip();
+			}
+		}
+
+		const folder = ensureWorkspace();
+
+		// Create a real directory with a subfolder as symlink target
+		const targetDir = vscode.Uri.joinPath(folder.uri, 'storage', 'docs');
+		await vscode.workspace.fs.createDirectory(targetDir);
+		const imagesDir = vscode.Uri.joinPath(targetDir, 'images');
+		await vscode.workspace.fs.createDirectory(imagesDir);
+
+		// Create a symlink: public/docs -> storage/docs
+		const publicDir = vscode.Uri.joinPath(folder.uri, 'public');
+		await vscode.workspace.fs.createDirectory(publicDir);
+		const symlinkPath = path.join(publicDir.fsPath, 'docs');
+		const symlinkType = process.platform === 'win32' ? 'junction' : 'dir';
+		await fs.symlink(targetDir.fsPath, symlinkPath, symlinkType);
+
+		// Add the subfolder inside the symlink (public/docs/images)
+		const subfolderUri = vscode.Uri.file(path.join(symlinkPath, 'images'));
+		await vscode.commands.executeCommand('gitignore-assistant.addToGitignore', subfolderUri);
+
+		// Verify the symlink itself is added, not the subfolder
+		const content = await readGitignore(folder);
+		const lines = content.trim().split('\n');
+		assert.ok(
+			lines.includes('/public/docs'),
+			'Symlink ancestor should be added instead of subfolder inside it'
+		);
+		assert.ok(
+			!lines.some((line) => line.includes('/public/docs/images')),
+			'Subfolder inside symlink should not be added directly'
+		);
+	});
+
+	test('Add command deduplicates when multiple items inside same symlink are selected', async function () {
+		this.timeout(10000);
+
+		// Skip on Windows without symlink permissions
+		if (process.platform === 'win32') {
+			try {
+				const testPath = path.join(tempDir, '.permission-test');
+				await fs.symlink('.', testPath, 'junction');
+				await fs.unlink(testPath);
+			} catch {
+				return this.skip();
+			}
+		}
+
+		const folder = ensureWorkspace();
+
+		// Create a real directory with subfolders as symlink target
+		const targetDir = vscode.Uri.joinPath(folder.uri, 'storage', 'assets');
+		await vscode.workspace.fs.createDirectory(targetDir);
+		const cssDir = vscode.Uri.joinPath(targetDir, 'css');
+		await vscode.workspace.fs.createDirectory(cssDir);
+		const jsDir = vscode.Uri.joinPath(targetDir, 'js');
+		await vscode.workspace.fs.createDirectory(jsDir);
+
+		// Create a symlink: public/assets -> storage/assets
+		const publicDir = vscode.Uri.joinPath(folder.uri, 'public');
+		await vscode.workspace.fs.createDirectory(publicDir);
+		const symlinkPath = path.join(publicDir.fsPath, 'assets');
+		const symlinkType = process.platform === 'win32' ? 'junction' : 'dir';
+		await fs.symlink(targetDir.fsPath, symlinkPath, symlinkType);
+
+		// Multi-select two subfolders inside the symlink
+		const cssUri = vscode.Uri.file(path.join(symlinkPath, 'css'));
+		const jsUri = vscode.Uri.file(path.join(symlinkPath, 'js'));
+		await vscode.commands.executeCommand('gitignore-assistant.addToGitignore', cssUri, [cssUri, jsUri]);
+
+		// Verify only one entry for the symlink itself
+		const content = await readGitignore(folder);
+		const lines = content.trim().split('\n');
+		const symlinkEntries = lines.filter((line) => line === '/public/assets');
+		assert.strictEqual(symlinkEntries.length, 1, 'Only one entry for the symlink should exist');
+		assert.ok(
+			!lines.some((line) => line.includes('/public/assets/css') || line.includes('/public/assets/js')),
+			'Subfolders inside symlink should not be added directly'
+		);
+	});
+
 	function ensureWorkspace(): vscode.WorkspaceFolder {
 		if (!workspaceFolder) {
 			throw new Error('Test workspace not initialized.');
